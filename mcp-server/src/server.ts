@@ -7,15 +7,7 @@ import {
 import * as cli from './obsidian-cli.js';
 import { adaptNote, newTaskNote } from './task-note.js';
 
-const VAULT_PATH = process.env.OBSIDIAN_VAULT || '';
 const KD_FOLDER = process.env.KD_FOLDER || 'Kuwadate';
-
-const KD_PROPERTIES = [
-    'kuwadate', 'kd_type', 'kd_status', 'kd_priority', 'kd_urgency',
-    'kd_parent', 'kd_depends_on', 'kd_duration', 'kd_start', 'kd_due',
-    'kd_owner', 'kd_collaborators', 'kd_cover', 'kd_cost', 'kd_created',
-    'kd_closed_reason',
-];
 
 const STATUS_VALUES = ['todo', 'in-progress', 'maintenance', 'blocked', 'waiting', 'done', 'cancelled'];
 
