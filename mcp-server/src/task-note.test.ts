@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { newTaskNote, renderFrontmatter, taskScaffold } from './task-note.js';
+import { adaptNote, newTaskNote, renderFrontmatter, taskScaffold } from './task-note.js';
 
 const CREATED = '2026-01-02';
 
@@ -79,5 +79,71 @@ Do it
 ## Other Tasks
 ![[Kuwadate.base#Ancestors]]
 `);
+    });
+});
+
+describe('adaptNote', () => {
+    it('adds the missing scaffold to existing frontmatter and keeps what is there', () => {
+        const note = `---
+title: Living Room Beams
+kd_due: 2026-03-01
+---
+
+Some body text.
+`;
+        expect(adaptNote(note, { parent: 'Interior', created: CREATED })).toBe(`---
+title: Living Room Beams
+kd_due: 2026-03-01
+kuwadate: 1
+kd_type: task
+kd_status: todo
+kd_priority:
+kd_urgency:
+kd_parent: "[[Interior]]"
+kd_depends_on:
+  -
+kd_duration:
+kd_start:
+kd_owner:
+kd_collaborators:
+  -
+kd_cover:
+kd_cost:
+kd_created: "${CREATED}"
+---
+
+Some body text.
+
+## Subtasks
+![[Kuwadate Descendants.base#Children]]
+
+## Other Tasks
+![[Kuwadate.base#Ancestors]]
+`);
+    });
+
+    it('creates a frontmatter block when the note has none', () => {
+        const result = adaptNote('Just a paragraph.\n', { created: CREATED });
+        expect(result.startsWith('---\nkuwadate: 1\nkd_type: task\n')).toBe(true);
+        expect(result).toContain(`kd_cost:\nkd_created: "${CREATED}"\n---\n\nJust a paragraph.\n\n## Subtasks\n`);
+        expect(result.split('\n').filter(l => l.startsWith('kd_'))).toHaveLength(14);
+    });
+
+    it('writes the same property set as a new task', () => {
+        const keys = (note: string) => note.split('\n---')[0].split('\n').filter(l => /^[a-z]/.test(l)).map(l => l.split(':')[0]);
+        expect(keys(adaptNote('body\n', { parent: 'P', created: CREATED })))
+            .toEqual(keys(newTaskNote({ parent: 'P', created: CREATED })));
+    });
+
+    it('does not duplicate the sections when the note already embeds its children', () => {
+        const note = '---\nfoo: 1\n---\n\n## Subtasks\n![[Kuwadate Descendants.base#Children]]\n';
+        const result = adaptNote(note, { created: CREATED });
+        expect(result.match(/## Subtasks/g)).toHaveLength(1);
+        expect(result.endsWith('## Subtasks\n![[Kuwadate Descendants.base#Children]]\n')).toBe(true);
+    });
+
+    it('handles CRLF notes and an empty frontmatter block', () => {
+        expect(adaptNote('---\r\n---\r\nbody', { created: CREATED })).toMatch(/^---\nkuwadate: 1\n/);
+        expect(adaptNote('---\r\nfoo: 1\r\n---\r\n\r\nbody', { created: CREATED })).toMatch(/^---\nfoo: 1\nkuwadate: 1\n/);
     });
 });

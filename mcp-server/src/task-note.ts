@@ -64,3 +64,31 @@ export function newTaskNote(opts: ScaffoldOptions & { description?: string }): s
     const frontmatter = renderFrontmatter(taskScaffold(opts)).join('\n');
     return `---\n${frontmatter}\n---\n\n## Description\n${opts.description || ''}\n\n## Notes\n\n\n${TASK_SECTIONS}`;
 }
+
+const FRONTMATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---(?=\r?\n|$)/;
+
+/**
+ * Turn an existing note into a task: scaffold properties the frontmatter
+ * lacks are added to it (or a frontmatter block is created), existing
+ * properties and content stay as they are, and the task sections are
+ * appended unless the note already embeds its children.
+ */
+export function adaptNote(content: string, opts: ScaffoldOptions): string {
+    const scaffold = taskScaffold(opts);
+    const match = content.match(FRONTMATTER);
+    let result: string;
+    if (match) {
+        const existing = match[1] ?? '';
+        const missing = Object.fromEntries(
+            Object.entries(scaffold).filter(([key]) => !new RegExp(`^${key}:`, 'm').test(existing)),
+        );
+        const block = [...(existing ? [existing] : []), ...renderFrontmatter(missing)].join('\n');
+        result = `---\n${block}\n---${content.slice(match[0].length)}`;
+    } else {
+        result = `---\n${renderFrontmatter(scaffold).join('\n')}\n---\n\n${content}`;
+    }
+    if (!result.includes('Kuwadate Descendants.base#Children')) {
+        result = `${result.trimEnd()}\n\n${TASK_SECTIONS}`;
+    }
+    return result;
+}

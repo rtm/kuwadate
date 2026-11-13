@@ -5,7 +5,7 @@ import {
     ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as cli from './obsidian-cli.js';
-import { newTaskNote } from './task-note.js';
+import { adaptNote, newTaskNote } from './task-note.js';
 
 const VAULT_PATH = process.env.OBSIDIAN_VAULT || '';
 const KD_FOLDER = process.env.KD_FOLDER || 'Kuwadate';
@@ -477,10 +477,9 @@ export class KuwadateMCPServer {
     private async adaptTask(args: any) {
         const { name, parent } = args;
         const today = new Date().toISOString().slice(0, 10);
-        const parentValue = parent ? `[[${parent}]]` : '';
 
         const code = `
-            (async () => {
+            (() => {
                 const file = app.vault.getMarkdownFiles().find(f => f.basename === ${JSON.stringify(name)});
                 if (!file) return JSON.stringify({ error: 'Note not found' });
                 const meta = app.metadataCache.getFileCache(file);
@@ -491,43 +490,11 @@ export class KuwadateMCPServer {
         const result = JSON.parse(await cli.evaluate(code));
         if (result.error) return errorResult(result.error);
 
-        // Read the existing content
         const content = await cli.readFile(result.path);
+        await cli.writeFile(result.path, adaptNote(content, { parent, created: today }));
 
-        const kuwadateProperties: Record<string, string> = {
-            kuwadate: '1',
-            kd_type: 'task',
-            kd_status: 'todo',
-            kd_parent: parentValue,
-            kd_created: today,
-        };
-
-        // Use processFrontMatter to add properties while preserving existing frontmatter
-        const propsJson = JSON.stringify(kuwadateProperties);
-        const addPropsCode = `
-            (async () => {
-                const file = app.vault.getMarkdownFiles().find(f => f.basename === ${JSON.stringify(name)});
-                if (!file) return 'Error: Note not found';
-                const props = ${propsJson};
-                await app.fileManager.processFrontMatter(file, (fm) => {
-                    for (const [key, value] of Object.entries(props)) {
-                        if (!(key in fm)) fm[key] = value;
-                    }
-                });
-                return 'OK';
-            })()
-        `;
-        const addResult = await cli.evaluate(addPropsCode);
-        if (addResult !== 'OK') return errorResult(addResult);
-
-        // Append subtasks sections if not present
-        if (!content.includes('Kuwadate Descendants.base#Children')) {
-            const updated = await cli.readFile(result.path);
-            const appended = updated.trimEnd() + '\n\n## Subtasks\n![[Kuwadate Descendants.base#Children]]\n\n## Other Tasks\n![[Kuwadate.base#Ancestors]]\n';
-            await cli.writeFile(result.path, appended);
-        }
-
-        return text(`Adapted note "${name}" into a kuwadate task.\nPath: ${result.path}`);
+        return text(`Adapted note "${name}" into a kuwadate task.
+Path: ${result.path}`);
     }
 
     async run() {
