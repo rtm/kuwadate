@@ -198,6 +198,20 @@ export class KuwadateMCPServer {
                         required: ['name'],
                     },
                 },
+                {
+                    name: 'kuwadate_delete_task',
+                    description: 'Delete a kuwadate task by moving its note to the system trash. Refuses when the task has child tasks; reparent or delete them first. For work that was dropped rather than mistaken, prefer kuwadate_complete_task or status "cancelled", which keep the history.',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            name: {
+                                type: 'string',
+                                description: 'Task name to delete',
+                            },
+                        },
+                        required: ['name'],
+                    },
+                },
             ],
         }));
 
@@ -219,6 +233,7 @@ export class KuwadateMCPServer {
                 case 'kuwadate_move_task': return await this.moveTask(args);
                 case 'kuwadate_complete_task': return await this.completeTask(args);
                 case 'kuwadate_adapt_task': return await this.adaptTask(args);
+                case 'kuwadate_delete_task': return await this.deleteTask(args);
                 default: return errorResult(`Unknown tool: ${name}`);
             }
         } catch (err: any) {
@@ -495,6 +510,35 @@ export class KuwadateMCPServer {
 
         return text(`Adapted note "${name}" into a kuwadate task.
 Path: ${result.path}`);
+    }
+
+    private async deleteTask(args: any) {
+        const { name } = args;
+
+        const code = `
+            (async () => {
+                const files = app.vault.getMarkdownFiles();
+                const file = files.find(f => f.basename === ${JSON.stringify(name)});
+                if (!file) return JSON.stringify({ error: 'Task not found' });
+                if (!app.metadataCache.getFileCache(file)?.frontmatter?.kuwadate) return JSON.stringify({ error: 'Note is not a kuwadate task' });
+                const children = [];
+                for (const f of files) {
+                    const fm = app.metadataCache.getFileCache(f)?.frontmatter;
+                    if (!fm?.kuwadate || !fm.kd_parent || f.path.includes('Template')) continue;
+                    const parent = String(fm.kd_parent).replace(/^\\[\\[/, '').replace(/(\\|[^\\]]*)?\\]\\]$/, '');
+                    if (parent === ${JSON.stringify(name)}) children.push(f.basename);
+                }
+                if (children.length > 0) return JSON.stringify({ children });
+                await app.vault.trash(file, true);
+                return JSON.stringify({ path: file.path });
+            })()
+        `;
+        const result = JSON.parse(await cli.evaluate(code));
+        if (result.error) return errorResult(result.error);
+        if (result.children) {
+            return errorResult(`Cannot delete "${name}": it has ${result.children.length} child task(s): ${result.children.join(', ')}. Reparent or delete them first.`);
+        }
+        return text(`Deleted task: ${name}\nPath: ${result.path}\nThe note was moved to the system trash.`);
     }
 
     async run() {

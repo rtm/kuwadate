@@ -68,6 +68,7 @@ The `mcp-server/` directory contains a [Model Context Protocol](https://modelcon
 | `kuwadate_move_task` | Move a task to a new parent |
 | `kuwadate_complete_task` | Mark a task as done |
 | `kuwadate_adapt_task` | Convert an existing note into a kuwadate task |
+| `kuwadate_delete_task` | Delete a task's note; refuses while the task has child tasks |
 
 ### Setup
 
