@@ -41,6 +41,26 @@ describe('obsidian-cli argv shape', () => {
         ]);
     });
 
+    it('readFile throws when the CLI reports an error on stdout', async () => {
+        nextStdout = 'Error: File "Tasks/foo.md" not found.';
+        await expect(cli.readFile('Tasks/foo.md')).rejects.toThrow('could not read Tasks/foo.md: File "Tasks/foo.md" not found.');
+    });
+
+    it('readFile returns a note whose first line merely starts with Error:', async () => {
+        nextStdout = 'Error: handling\n\nA note about error handling.\n';
+        await expect(cli.readFile('Tasks/foo.md')).resolves.toBe(nextStdout);
+    });
+
+    it('readFile throws when nothing came back but stderr did', async () => {
+        nextStderr = 'Obsidian is not running';
+        await expect(cli.readFile('Tasks/foo.md')).rejects.toThrow('could not read Tasks/foo.md: Obsidian is not running');
+    });
+
+    it('writeFile throws when the CLI reports an error on stdout', async () => {
+        nextStdout = 'Error: Folder "Nope" does not exist.';
+        await expect(cli.writeFile('Nope/foo.md', 'x')).rejects.toThrow('could not write Nope/foo.md: Folder "Nope" does not exist.');
+    });
+
     it('readProperty uses `property:read name=... path=...`', async () => {
         nextStdout = 'value';
         await cli.readProperty('Tasks/foo.md', 'kd_status');

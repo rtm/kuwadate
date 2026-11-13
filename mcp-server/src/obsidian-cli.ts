@@ -27,16 +27,33 @@ async function run(args: string[]): Promise<ExecResult> {
     }
 }
 
+/**
+ * The CLI exits 0 even when a command fails and reports the failure as a
+ * single `Error: ...` line on stdout. Surface that as a thrown error so a
+ * caller never mistakes it for file content or for a successful write.
+ */
+function throwIfCliError(result: ExecResult, what: string): void {
+    const out = result.stdout.trim();
+    if (/^Error: [^\n]*$/.test(out)) {
+        throw new Error(`Obsidian CLI could not ${what}: ${out.slice('Error: '.length)}`);
+    }
+    if (!out && result.stderr.trim()) {
+        throw new Error(`Obsidian CLI could not ${what}: ${result.stderr.trim()}`);
+    }
+}
+
 /** Read a file's content from the vault. */
 export async function readFile(path: string): Promise<string> {
-    const { stdout } = await run(['read', `path=${path}`]);
-    return stdout;
+    const result = await run(['read', `path=${path}`]);
+    throwIfCliError(result, `read ${path}`);
+    return result.stdout;
 }
 
 /** Write content to a file in the vault (creates or overwrites). */
 export async function writeFile(path: string, content: string): Promise<void> {
     const escaped = content.replace(/\n/g, '\\n').replace(/\t/g, '\\t');
-    await run(['create', `path=${path}`, `content=${escaped}`, 'overwrite']);
+    const result = await run(['create', `path=${path}`, `content=${escaped}`, 'overwrite']);
+    throwIfCliError(result, `write ${path}`);
 }
 
 /** Read a frontmatter property from a file. */
