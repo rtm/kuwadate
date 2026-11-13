@@ -11,6 +11,15 @@ export interface ScaffoldOptions {
 
 export type FrontmatterValue = string | number | null | string[];
 
+/**
+ * Today as YYYY-MM-DD in the local time zone. toISOString() would give the
+ * UTC date, which is already tomorrow every evening in the Americas.
+ */
+export function localDate(now = new Date()): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 /** The kd_ properties every task carries, in file order. Blank values are null; lists start empty. */
 export function taskScaffold(opts: ScaffoldOptions): Record<string, FrontmatterValue> {
     return {
@@ -52,8 +61,9 @@ export function renderFrontmatter(props: Record<string, FrontmatterValue>): stri
 
 function yamlScalar(value: string | number): string {
     if (typeof value === 'number') return String(value);
-    // Wikilinks and dates are quoted so YAML keeps them as strings.
-    return /^\[\[|^\d{4}-\d{2}-\d{2}$/.test(value) ? `"${value}"` : value;
+    // Wikilinks and dates are quoted so YAML keeps them as strings; so is anything holding a quote or backslash.
+    if (!/^\[\[|^\d{4}-\d{2}-\d{2}$|["\\]/.test(value)) return value;
+    return `"${value.replace(/["\\]/g, '\\$&')}"`;
 }
 
 /** The Bases embeds that show a task's children and ancestors. */
@@ -71,9 +81,11 @@ const FRONTMATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---(?=\r?\n|$)/;
  * Turn an existing note into a task: scaffold properties the frontmatter
  * lacks are added to it (or a frontmatter block is created), existing
  * properties and content stay as they are, and the task sections are
- * appended unless the note already embeds its children.
+ * appended unless the note already embeds its children. New lines use the
+ * note's own line ending.
  */
 export function adaptNote(content: string, opts: ScaffoldOptions): string {
+    const eol = content.includes('\r\n') ? '\r\n' : '\n';
     const scaffold = taskScaffold(opts);
     const match = content.match(FRONTMATTER);
     let result: string;
@@ -82,13 +94,13 @@ export function adaptNote(content: string, opts: ScaffoldOptions): string {
         const missing = Object.fromEntries(
             Object.entries(scaffold).filter(([key]) => !new RegExp(`^${key}:`, 'm').test(existing)),
         );
-        const block = [...(existing ? [existing] : []), ...renderFrontmatter(missing)].join('\n');
-        result = `---\n${block}\n---${content.slice(match[0].length)}`;
+        const block = [...(existing ? [existing] : []), ...renderFrontmatter(missing)].join(eol);
+        result = `---${eol}${block}${eol}---${content.slice(match[0].length)}`;
     } else {
-        result = `---\n${renderFrontmatter(scaffold).join('\n')}\n---\n\n${content}`;
+        result = `---${eol}${renderFrontmatter(scaffold).join(eol)}${eol}---${eol}${eol}${content}`;
     }
     if (!result.includes('Kuwadate Descendants.base#Children')) {
-        result = `${result.trimEnd()}\n\n${TASK_SECTIONS}`;
+        result = `${result.trimEnd()}${eol}${eol}${TASK_SECTIONS.replaceAll('\n', eol)}`;
     }
     return result;
 }

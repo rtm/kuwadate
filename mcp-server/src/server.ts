@@ -5,9 +5,12 @@ import {
     ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as cli from './obsidian-cli.js';
-import { adaptNote, newTaskNote } from './task-note.js';
+import { adaptNote, localDate, newTaskNote } from './task-note.js';
 
 const KD_FOLDER = process.env.KD_FOLDER || 'Kuwadate';
+
+/** Obsidian-side JS: the parent task's name from a kd_parent value, wikilink brackets and any alias stripped. */
+const PARENT_NAME_JS = `(value) => value ? String(value).replace(/^\\[\\[/, '').replace(/(\\|[^\\]]*)?\\]\\]$/, '') : null`;
 
 const STATUS_VALUES = ['todo', 'in-progress', 'maintenance', 'blocked', 'waiting', 'done', 'cancelled'];
 
@@ -237,6 +240,7 @@ export class KuwadateMCPServer {
         // Use eval to get task data from the plugin
         const code = `
             (() => {
+                const parentName = ${PARENT_NAME_JS};
                 const tasks = [];
                 for (const file of app.vault.getMarkdownFiles()) {
                     const meta = app.metadataCache.getFileCache(file);
@@ -249,7 +253,7 @@ export class KuwadateMCPServer {
                         status: fm.kd_status || 'todo',
                         priority: fm.kd_priority || null,
                         urgency: fm.kd_urgency || null,
-                        parent: fm.kd_parent || null,
+                        parent: parentName(fm.kd_parent),
                         due: fm.kd_due || null,
                     });
                 }
@@ -263,10 +267,7 @@ export class KuwadateMCPServer {
             tasks = tasks.filter((t: any) => t.status === args.status);
         }
         if (args?.parent) {
-            tasks = tasks.filter((t: any) => {
-                const p = t.parent?.replace(/^\[\[/, '').replace(/\]\]$/, '') || '';
-                return p === args.parent;
-            });
+            tasks = tasks.filter((t: any) => t.parent === args.parent);
         }
 
         if (tasks.length === 0) {
@@ -279,7 +280,7 @@ export class KuwadateMCPServer {
             if (t.priority) parts.push(`P${t.priority}`);
             if (t.urgency) parts.push(`U${t.urgency}`);
             if (t.due) parts.push(`due:${t.due}`);
-            if (t.parent) parts.push(`← ${t.parent.replace(/[\[\]]/g, '')}`);
+            if (t.parent) parts.push(`← ${t.parent}`);
             return parts.join(' ');
         });
 
@@ -310,8 +311,7 @@ export class KuwadateMCPServer {
 
     private async createTask(args: any) {
         const { name, parent, status, priority, urgency, description } = args;
-        const today = new Date().toISOString().slice(0, 10);
-        const content = newTaskNote({ status, priority, urgency, parent, description, created: today });
+        const content = newTaskNote({ status, priority, urgency, parent, description, created: localDate() });
 
         // Resolve folder based on plugin settings, matching the plugin's getTaskFolder logic
         const settingsCode = `
@@ -385,13 +385,14 @@ export class KuwadateMCPServer {
     private async getTree(args: any) {
         const code = `
             (() => {
+                const parentName = ${PARENT_NAME_JS};
                 const nodes = new Map();
                 for (const file of app.vault.getMarkdownFiles()) {
                     const meta = app.metadataCache.getFileCache(file);
                     if (!meta?.frontmatter?.kuwadate) continue;
                     if (file.path.includes('Template')) continue;
                     const fm = meta.frontmatter;
-                    const parent = fm.kd_parent ? String(fm.kd_parent).replace(/^\\[\\[/, '').replace(/\\]\\]$/, '') : null;
+                    const parent = parentName(fm.kd_parent);
                     nodes.set(file.basename, {
                         name: file.basename,
                         status: fm.kd_status || 'todo',
@@ -483,7 +484,6 @@ export class KuwadateMCPServer {
 
     private async adaptTask(args: any) {
         const { name, parent } = args;
-        const today = new Date().toISOString().slice(0, 10);
 
         const code = `
             (() => {
@@ -498,7 +498,7 @@ export class KuwadateMCPServer {
         if (result.error) return errorResult(result.error);
 
         const content = await cli.readFile(result.path);
-        await cli.writeFile(result.path, adaptNote(content, { parent, created: today }));
+        await cli.writeFile(result.path, adaptNote(content, { parent, created: localDate() }));
 
         return text(`Adapted note "${name}" into a kuwadate task.
 Path: ${result.path}`);
@@ -509,16 +509,18 @@ Path: ${result.path}`);
 
         const code = `
             (async () => {
+                const parentName = ${PARENT_NAME_JS};
                 const files = app.vault.getMarkdownFiles();
-                const file = files.find(f => f.basename === ${JSON.stringify(name)});
-                if (!file) return JSON.stringify({ error: 'Task not found' });
+                const matches = files.filter(f => f.basename === ${JSON.stringify(name)});
+                if (matches.length === 0) return JSON.stringify({ error: 'Task not found' });
+                if (matches.length > 1) return JSON.stringify({ duplicates: matches.map(f => f.path) });
+                const file = matches[0];
                 if (!app.metadataCache.getFileCache(file)?.frontmatter?.kuwadate) return JSON.stringify({ error: 'Note is not a kuwadate task' });
                 const children = [];
                 for (const f of files) {
                     const fm = app.metadataCache.getFileCache(f)?.frontmatter;
-                    if (!fm?.kuwadate || !fm.kd_parent || f.path.includes('Template')) continue;
-                    const parent = String(fm.kd_parent).replace(/^\\[\\[/, '').replace(/(\\|[^\\]]*)?\\]\\]$/, '');
-                    if (parent === ${JSON.stringify(name)}) children.push(f.basename);
+                    if (!fm?.kuwadate || f.path.includes('Template')) continue;
+                    if (parentName(fm.kd_parent) === ${JSON.stringify(name)}) children.push(f.basename);
                 }
                 if (children.length > 0) return JSON.stringify({ children });
                 await app.vault.trash(file, true);
@@ -527,6 +529,9 @@ Path: ${result.path}`);
         `;
         const result = JSON.parse(await cli.evaluate(code));
         if (result.error) return errorResult(result.error);
+        if (result.duplicates) {
+            return errorResult(`More than one note is named "${name}": ${result.duplicates.join(', ')}. Rename or move one first.`);
+        }
         if (result.children) {
             return errorResult(`Cannot delete "${name}": it has ${result.children.length} child task(s): ${result.children.join(', ')}. Reparent or delete them first.`);
         }

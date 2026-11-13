@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { adaptNote, newTaskNote, renderFrontmatter, taskScaffold } from './task-note.js';
+import { adaptNote, localDate, newTaskNote, renderFrontmatter, taskScaffold } from './task-note.js';
 
 const CREATED = '2026-01-02';
+
+describe('localDate', () => {
+    it('formats the local calendar date, not the UTC one', () => {
+        expect(localDate(new Date(2026, 10, 12, 23, 30))).toBe('2026-11-12');
+        expect(localDate(new Date(2026, 0, 5, 0, 0))).toBe('2026-01-05');
+    });
+});
 
 describe('taskScaffold', () => {
     it('lists every kd_ property a task carries, in file order', () => {
@@ -41,6 +48,13 @@ describe('renderFrontmatter', () => {
             '  - "[[Alice]]"',
             '  - Carol',
             `kd_created: "${CREATED}"`,
+        ]);
+    });
+
+    it('escapes quotes and backslashes inside quoted values', () => {
+        expect(renderFrontmatter({ kd_parent: '[[Fix the "Smart" Lock]]', kd_owner: 'C:\\Users' })).toEqual([
+            'kd_parent: "[[Fix the \\"Smart\\" Lock]]"',
+            'kd_owner: "C:\\\\Users"',
         ]);
     });
 });
@@ -142,8 +156,14 @@ Some body text.
         expect(result.endsWith('## Subtasks\n![[Kuwadate Descendants.base#Children]]\n')).toBe(true);
     });
 
-    it('handles CRLF notes and an empty frontmatter block', () => {
-        expect(adaptNote('---\r\n---\r\nbody', { created: CREATED })).toMatch(/^---\nkuwadate: 1\n/);
-        expect(adaptNote('---\r\nfoo: 1\r\n---\r\n\r\nbody', { created: CREATED })).toMatch(/^---\nfoo: 1\nkuwadate: 1\n/);
+    it('keeps a CRLF note entirely CRLF', () => {
+        const result = adaptNote('---\r\nfoo: 1\r\n---\r\n\r\nbody\r\n', { created: CREATED });
+        expect(result.startsWith('---\r\nfoo: 1\r\nkuwadate: 1\r\nkd_type: task\r\n')).toBe(true);
+        expect(result.endsWith('body\r\n\r\n## Subtasks\r\n![[Kuwadate Descendants.base#Children]]\r\n\r\n## Other Tasks\r\n![[Kuwadate.base#Ancestors]]\r\n')).toBe(true);
+        expect(result.replaceAll('\r\n', '')).not.toContain('\n');
+    });
+
+    it('handles an empty frontmatter block', () => {
+        expect(adaptNote('---\n---\nbody', { created: CREATED })).toMatch(/^---\nkuwadate: 1\n/);
     });
 });

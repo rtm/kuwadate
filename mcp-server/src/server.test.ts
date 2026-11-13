@@ -47,6 +47,14 @@ describe('kuwadate_adapt_task', () => {
         expect(written).toContain('Body.\n\n## Subtasks\n');
     });
 
+    it('stops before writing when the read fails, so the note is left alone', async () => {
+        outputs.push('=> {"path":"Notes/Beams.md"}', 'Error: File "Notes/Beams.md" not found.');
+        const result = await server.callTool('kuwadate_adapt_task', { name: 'Beams' });
+        expect(result.isError).toBe(true);
+        expect(resultText(result)).toContain('could not read Notes/Beams.md');
+        expect(calls).toHaveLength(2);
+    });
+
     it('refuses a note that is already a task without touching it', async () => {
         outputs.push('=> {"error":"Note is already a kuwadate task"}');
         const result = await server.callTool('kuwadate_adapt_task', { name: 'Beams' });
@@ -71,6 +79,13 @@ describe('kuwadate_delete_task', () => {
         const result = await server.callTool('kuwadate_delete_task', { name: 'Parent' });
         expect(result.isError).toBe(true);
         expect(resultText(result)).toBe('Error: Cannot delete "Parent": it has 2 child task(s): Child A, Child B. Reparent or delete them first.');
+    });
+
+    it('refuses when more than one note has the name, listing their paths', async () => {
+        outputs.push('=> {"duplicates":["Tasks/Review.md","Archive/Review.md"]}');
+        const result = await server.callTool('kuwadate_delete_task', { name: 'Review' });
+        expect(result.isError).toBe(true);
+        expect(resultText(result)).toBe('Error: More than one note is named "Review": Tasks/Review.md, Archive/Review.md. Rename or move one first.');
     });
 
     it('passes a lookup error through', async () => {
@@ -116,5 +131,35 @@ describe('kuwadate_delete_task', () => {
 
         expect(await run(fakeApp({ 'T/Other.md': null }))).toEqual({ error: 'Task not found' });
         expect(await run(fakeApp({ 'T/Parent.md': { title: 'not a task' } }))).toEqual({ error: 'Note is not a kuwadate task' });
+        expect(await run(fakeApp({ 'A/Parent.md': { kuwadate: 1 }, 'B/Parent.md': { kuwadate: 1 } })))
+            .toEqual({ duplicates: ['A/Parent.md', 'B/Parent.md'] });
+        expect(trashed).toEqual(['T/Parent.md']);
+    });
+});
+
+describe('kuwadate_list_tasks', () => {
+    it('filters by parent name and shows it without wikilink brackets', async () => {
+        outputs.push('=> ' + JSON.stringify([
+            { name: 'Kid', path: 'T/Kid.md', status: 'todo', priority: 2, urgency: null, parent: 'Parent', due: null },
+            { name: 'Other', path: 'T/Other.md', status: 'todo', priority: null, urgency: null, parent: 'Elsewhere', due: null },
+        ]));
+        const result = await server.callTool('kuwadate_list_tasks', { parent: 'Parent' });
+        expect(resultText(result)).toBe('1 task(s):\n\nKid [todo] P2 ← Parent');
+    });
+
+    it('sends Obsidian a script that strips wikilink brackets and aliases from kd_parent', async () => {
+        outputs.push('=> []');
+        await server.callTool('kuwadate_list_tasks', {});
+        const script = calls[0][1].replace(/^code=/, '').trim();
+        const notes: Record<string, Record<string, unknown>> = {
+            'T/Kid.md': { kuwadate: 1, kd_parent: '[[Parent|the parent]]' },
+            'T/Root.md': { kuwadate: 1 },
+        };
+        const app = {
+            vault: { getMarkdownFiles: () => Object.keys(notes).map(path => ({ path, basename: path.replace(/.*\//, '').replace(/\.md$/, '') })) },
+            metadataCache: { getFileCache: (file: { path: string }) => ({ frontmatter: notes[file.path] }) },
+        };
+        const tasks = JSON.parse(new Function('app', `return ${script}`)(app));
+        expect(tasks.map((t: { name: string; parent: string | null }) => [t.name, t.parent])).toEqual([['Kid', 'Parent'], ['Root', null]]);
     });
 });
