@@ -5,6 +5,7 @@ import {
     ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as cli from './obsidian-cli.js';
+import { newTaskNote } from './task-note.js';
 
 const VAULT_PATH = process.env.OBSIDIAN_VAULT || '';
 const KD_FOLDER = process.env.KD_FOLDER || 'Kuwadate';
@@ -298,41 +299,7 @@ class KuwadateMCPServer {
     private async createTask(args: any) {
         const { name, parent, status, priority, urgency, description } = args;
         const today = new Date().toISOString().slice(0, 10);
-        const parentValue = parent ? `"[[${parent}]]"` : '';
-        const desc = description || '';
-
-        const content = `---
-kuwadate: 1
-kd_type: task
-kd_status: ${status || 'todo'}
-kd_priority: ${priority || ''}
-kd_urgency: ${urgency || ''}
-kd_parent: ${parentValue}
-kd_depends_on:
-  -
-kd_duration:
-kd_start:
-kd_due:
-kd_owner:
-kd_collaborators:
-  -
-kd_cover:
-kd_cost:
-kd_created: "${today}"
----
-
-## Description
-${desc}
-
-## Notes
-
-
-## Subtasks
-![[Kuwadate Descendants.base#Children]]
-
-## Other Tasks
-![[Kuwadate.base#Ancestors]]
-`;
+        const content = newTaskNote({ status, priority, urgency, parent, description, created: today });
 
         // Resolve folder based on plugin settings, matching the plugin's getTaskFolder logic
         const settingsCode = `
